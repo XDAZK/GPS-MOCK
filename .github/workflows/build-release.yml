@@ -1,0 +1,109 @@
+name: Build and Release APK
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+    inputs:
+      release_title:
+        description: 'Release Title'
+        required: false
+        default: 'GPS Mock Release'
+      release_notes:
+        description: 'Release Notes'
+        required: false
+        default: 'New release of GPS Mock with saved locations and automated route scheduling.'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Release APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Make Gradlew Executable
+        run: chmod +x gradlew
+
+      - name: Configure Release Signing Key
+        run: |
+          if [ -n "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" ]; then
+            echo "Using configured GitHub Secret release keystore..."
+            echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 --decode > "$GITHUB_WORKSPACE/my-upload-key.jks"
+            echo "KEYSTORE_PATH=$GITHUB_WORKSPACE/my-upload-key.jks" >> $GITHUB_ENV
+            echo "STORE_PASSWORD=${{ secrets.STORE_PASSWORD }}" >> $GITHUB_ENV
+            echo "KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}" >> $GITHUB_ENV
+          else
+            echo "Generating automated release signing keystore for CI..."
+            keytool -genkey -v \
+              -keystore "$GITHUB_WORKSPACE/my-upload-key.jks" \
+              -alias upload \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -storepass android \
+              -keypass android \
+              -dname "CN=GPSMock, OU=AIStudio, O=GPSMock, L=Hanoi, S=HN, C=VN"
+            echo "KEYSTORE_PATH=$GITHUB_WORKSPACE/my-upload-key.jks" >> $GITHUB_ENV
+            echo "STORE_PASSWORD=android" >> $GITHUB_ENV
+            echo "KEY_PASSWORD=android" >> $GITHUB_ENV
+          fi
+
+      - name: Build Release APK
+        run: ./gradlew :app:assembleRelease --stacktrace
+
+      - name: Prepare APK Artifacts
+        run: |
+          mkdir -p release-output
+          # Copy release apk if generated, or fall back to debug
+          if ls app/build/outputs/apk/release/*.apk 1> /dev/null 2>&1; then
+            cp app/build/outputs/apk/release/*.apk release-output/GPS-Mock-release.apk
+          else
+            echo "Release APK not found, building debug as fallback..."
+            ./gradlew :app:assembleDebug
+            cp app/build/outputs/apk/debug/*.apk release-output/GPS-Mock-debug.apk
+          fi
+          ls -la release-output/
+
+      - name: Upload APK to Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gps-mock-apk
+          path: release-output/*.apk
+          retention-days: 14
+
+      - name: Publish GitHub Release (on tag or manual)
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-output/*.apk
+          name: ${{ github.event.inputs.release_title || github.ref_name }}
+          body: |
+            ### GPS Mock Release
+            - Fake GPS location mocking with Android Test Provider and Foreground Service
+            - Saved coordinates management with categories and 1-tap teleport
+            - Automated route & timed schedule location shifting
+            - Real-time Joystick overlay control
+            - Realistic GPS jitter & accuracy simulation
+            
+            ${{ github.event.inputs.release_notes || '' }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

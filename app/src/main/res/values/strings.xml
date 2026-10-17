@@ -1,0 +1,35 @@
+<resources>
+    <string name="app_name">GPS Mock</string>
+    <string name="start_mocking">Start Mocking</string>
+    <string name="stop_mocking">Stop Mocking</string>
+    <string name="mocking_active">Mocking Active</string>
+    <string name="mocking_inactive">Mocking Inactive</string>
+    <string name="current_coordinates">Current Coordinates</string>
+    <string name="saved_locations">Saved Locations</string>
+    <string name="schedule_and_routes">Routes &amp; Schedule</string>
+    <string name="joystick">Joystick</string>
+    <string name="settings">Settings</string>
+    <string name="developer_options">Developer Options</string>
+    <string name="notification_channel_name">GPS Mock Service</string>
+    <string name="notification_channel_desc">Active mock location background service</string>
+    <string name="search_location_hint">Search address or coordinates…</string>
+    <string name="save_location">Save Location</string>
+    <string name="location_name_hint">Name (e.g. Home, Office, Landmark)</string>
+    <string name="location_category_hint">Category (Favorites, Work, Travel, Route)</string>
+    <string name="save_button">Save</string>
+    <string name="cancel_button">Cancel</string>
+    <string name="teleport">Teleport</string>
+    <string name="delete_location">Delete</string>
+    <string name="create_route">New Route Schedule</string>
+    <string name="route_name">Route Name</string>
+    <string name="speed_kmh">Speed (km/h)</string>
+    <string name="interval_sec">Interval (sec)</string>
+    <string name="loop_mode">Loop Mode</string>
+    <string name="start_schedule">Start Schedule</string>
+    <string name="stop_schedule">Stop Schedule</string>
+    <string name="enable_mock_app_title">Mock Location Setup Required</string>
+    <string name="enable_mock_app_desc">Please select GPS Mock as the "Mock location app" in Developer Options.</string>
+    <string name="open_developer_options">Open Developer Options</string>
+    <string name="export_saved">Export JSON</string>
+    <string name="import_saved">Import JSON</string>
+</resources>

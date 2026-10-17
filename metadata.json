@@ -1,0 +1,6 @@
+{
+  "name": "GPS Mock",
+  "description": "Mock GPS location app with saved coordinates, automated route scheduling, joystick control, and GitHub Actions CI/CD release workflow.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,7 +1,9 @@
 package com.example.data.repository
 
+import com.example.data.dao.MockHistoryDao
 import com.example.data.dao.RouteScheduleDao
 import com.example.data.dao.SavedLocationDao
+import com.example.data.model.MockHistoryEntry
 import com.example.data.model.RouteSchedule
 import com.example.data.model.SavedLocation
 import com.example.data.model.Waypoint
@@ -11,7 +13,8 @@ import kotlinx.coroutines.flow.Flow
 
 class GpsMockRepository(
     private val savedLocationDao: SavedLocationDao,
-    private val routeScheduleDao: RouteScheduleDao
+    private val routeScheduleDao: RouteScheduleDao,
+    private val mockHistoryDao: MockHistoryDao
 ) {
     private val moshi = Moshi.Builder().build()
     private val waypointListType = Types.newParameterizedType(List::class.java, Waypoint::class.java)
@@ -19,6 +22,7 @@ class GpsMockRepository(
 
     val allSavedLocations: Flow<List<SavedLocation>> = savedLocationDao.getAllSavedLocations()
     val allRouteSchedules: Flow<List<RouteSchedule>> = routeScheduleDao.getAllRouteSchedules()
+    val allHistory: Flow<List<MockHistoryEntry>> = mockHistoryDao.getAllHistory()
 
     suspend fun saveLocation(location: SavedLocation): Long {
         return savedLocationDao.insert(location)
@@ -54,6 +58,18 @@ class GpsMockRepository(
 
     suspend fun getRouteById(id: Long): RouteSchedule? {
         return routeScheduleDao.getById(id)
+    }
+
+    suspend fun addHistoryEntry(entry: MockHistoryEntry): Long {
+        return mockHistoryDao.insert(entry)
+    }
+
+    suspend fun finishHistoryEntry(id: Long, durationSeconds: Long) {
+        mockHistoryDao.updateEnd(id, System.currentTimeMillis(), durationSeconds)
+    }
+
+    suspend fun clearHistory() {
+        mockHistoryDao.clearAll()
     }
 
     fun parseWaypoints(json: String): List<Waypoint> {

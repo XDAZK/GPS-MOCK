@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <link rel="stylesheet" href="leaflet.css" />
+    <script src="leaflet.js"></script>
+    <style>
+        * {
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+            box-sizing: border-box;
+        }
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #0B0F19;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+        #map {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: #0B0F19;
+        }
+        .leaflet-container {
+            background-color: #0B0F19 !important;
+        }
+        /* Custom Modern Pin matching elsewhere/gps-mock */
+        .mock-pin-wrapper {
+            position: relative;
+            width: 44px;
+            height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .mock-pin-pulse {
+            position: absolute;
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            background: rgba(56, 189, 248, 0.25);
+            animation: pulse 2s infinite ease-out;
+        }
+        .mock-pin-core {
+            position: relative;
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            background: #38BDF8;
+            border: 3px solid #FFFFFF;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4), 0 0 10px rgba(56, 189, 248, 0.8);
+            z-index: 2;
+        }
+        .mock-pin-core::after {
+            content: '';
+            position: absolute;
+            width: 6px;
+            height: 6px;
+            background: #0F172A;
+            border-radius: 50%;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+        @keyframes pulse {
+            0% { transform: scale(0.6); opacity: 0.8; }
+            100% { transform: scale(1.6); opacity: 0; }
+        }
+        .leaflet-control-attribution {
+            display: none !important;
+        }
+        /* Dark tile styling filter for night mode aesthetics */
+        .dark-tiles .leaflet-tile {
+            filter: brightness(0.85) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <script>
+        var map;
+        var marker;
+        var routePolyline;
+        var isDarkStyle = false;
+
+        function initMap(lat, lng) {
+            if (map) return;
+
+            map = L.map('map', {
+                zoomControl: false,
+                attributionControl: false,
+                maxZoom: 19,
+                minZoom: 3
+            }).setView([lat, lng], 15);
+
+            // OpenStreetMap tile layer (Reliable, fast, worldwide coverage)
+            var tileUrl = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+            L.tileLayer(tileUrl, {
+                maxZoom: 19,
+                subdomains: ['a', 'b', 'c']
+            }).addTo(map);
+
+            var pinIcon = L.divIcon({
+                className: 'custom-mock-pin',
+                html: '<div class="mock-pin-wrapper"><div class="mock-pin-pulse"></div><div class="mock-pin-core"></div></div>',
+                iconSize: [44, 44],
+                iconAnchor: [22, 22]
+            });
+
+            marker = L.marker([lat, lng], {
+                icon: pinIcon,
+                draggable: true
+            }).addTo(map);
+
+            marker.on('dragend', function(e) {
+                var pos = marker.getLatLng();
+                if (window.AndroidBridge) {
+                    window.AndroidBridge.onLocationSelected(pos.lat, pos.lng);
+                }
+            });
+
+            map.on('click', function(e) {
+                marker.setLatLng(e.latlng);
+                if (window.AndroidBridge) {
+                    window.AndroidBridge.onLocationSelected(e.latlng.lat, e.latlng.lng);
+                }
+            });
+
+            // Make sure Leaflet recalculates dimensions immediately
+            map.invalidateSize();
+            setTimeout(function() { if (map) map.invalidateSize(); }, 200);
+            setTimeout(function() { if (map) map.invalidateSize(); }, 600);
+            setTimeout(function() { if (map) map.invalidateSize(); }, 1200);
+        }
+
+        window.updateMockMarker = function(lat, lng, bearing) {
+            if (marker) {
+                marker.setLatLng([lat, lng]);
+            }
+        };
+
+        window.centerMap = function(lat, lng) {
+            if (map) {
+                map.panTo([lat, lng], { animate: true });
+                if (marker) marker.setLatLng([lat, lng]);
+            }
+        };
+
+        window.zoomIn = function() {
+            if (map) map.zoomIn();
+        };
+
+        window.zoomOut = function() {
+            if (map) map.zoomOut();
+        };
+
+        window.drawRoute = function(waypointsJson) {
+            try {
+                var points = JSON.parse(waypointsJson);
+                var latLngs = points.map(function(p) { return [p.latitude, p.longitude]; });
+
+                if (routePolyline) {
+                    map.removeLayer(routePolyline);
+                }
+
+                if (latLngs.length >= 2) {
+                    routePolyline = L.polyline(latLngs, {
+                        color: '#38BDF8',
+                        weight: 4,
+                        opacity: 0.85,
+                        dashArray: '8, 8'
+                    }).addTo(map);
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        };
+
+        window.toggleMapStyle = function(dark) {
+            var container = document.getElementById('map');
+            if (dark) {
+                container.classList.add('dark-tiles');
+            } else {
+                container.classList.remove('dark-tiles');
+            }
+        };
+
+        window.addEventListener('resize', function() {
+            if (map) map.invalidateSize();
+        });
+    </script>
+</body>
+</html>

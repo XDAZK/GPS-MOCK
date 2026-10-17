@@ -4,11 +4,16 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
+import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
+import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -27,13 +32,19 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.EditLocationAlt
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Gamepad
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.NearMe
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.Stop
@@ -99,6 +110,7 @@ fun MapScreen(
 ) {
     val context = LocalContext.current
     val mockState by viewModel.mockEngineState.collectAsStateWithLifecycle()
+    val savedLocations by viewModel.savedLocations.collectAsStateWithLifecycle()
     val showJoystick by viewModel.showJoystick.collectAsStateWithLifecycle()
     val showCoordDialog by viewModel.showCoordinateDialog.collectAsStateWithLifecycle()
     val showSaveDialog by viewModel.showSaveLocationDialog.collectAsStateWithLifecycle()
@@ -109,26 +121,40 @@ fun MapScreen(
 
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var isMapLoaded by remember { mutableStateOf(false) }
+    var isDeckExpanded by remember { mutableStateOf(false) }
+    var isDarkTiles by remember { mutableStateOf(true) }
 
-    // Update map marker whenever Kotlin mock location changes
+    // Check if current location matches any saved favorite
+    val isFavorite = savedLocations.any {
+        Math.abs(it.latitude - mockState.latitude) < 0.0001 &&
+        Math.abs(it.longitude - mockState.longitude) < 0.0001
+    }
+
+    // Push coordinates to Leaflet whenever location changes
     LaunchedEffect(mockState.latitude, mockState.longitude, isMapLoaded) {
         if (isMapLoaded && webViewRef != null) {
-            val js = "javascript:updateMockMarker(${mockState.latitude}, ${mockState.longitude}, ${mockState.bearing});"
+            val js = "javascript:if(window.updateMockMarker) window.updateMockMarker(${mockState.latitude}, ${mockState.longitude}, ${mockState.bearing});"
             webViewRef?.evaluateJavascript(js, null)
         }
     }
 
     Box(modifier = modifier.fillMaxSize().testTag("map_screen_container")) {
-        // Embedded Leaflet Map WebView
+
+        // Full-bleed Map View: loads local standalone Leaflet engine
         AndroidView(
             modifier = Modifier.fillMaxSize().testTag("leaflet_map_view"),
             factory = { ctx ->
                 WebView(ctx).apply {
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
-                    settings.cacheMode = WebSettings.LOAD_DEFAULT
+                    settings.allowFileAccess = true
+                    settings.allowContentAccess = true
+                    settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                    settings.setSupportZoom(true)
                     settings.builtInZoomControls = false
                     settings.displayZoomControls = false
+                    settings.loadWithOverviewMode = true
+                    settings.useWideViewPort = true
 
                     addJavascriptInterface(
                         WebAppInterface { lat, lng ->
@@ -137,23 +163,25 @@ fun MapScreen(
                         "AndroidBridge"
                     )
 
+                    webChromeClient = object : WebChromeClient() {
+                        override fun onConsoleMessage(msg: ConsoleMessage?): Boolean {
+                            Log.d("GPSMockMap", "${msg?.message()} -- line ${msg?.lineNumber()}")
+                            return true
+                        }
+                    }
+
                     webViewClient = object : WebViewClient() {
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
                             isMapLoaded = true
-                            // Initial center
+                            // Initialize map view at current coordinates
                             val js = "javascript:initMap(${mockState.latitude}, ${mockState.longitude});"
                             evaluateJavascript(js, null)
                         }
                     }
 
-                    loadDataWithBaseURL(
-                        "https://openstreetmap.org",
-                        generateMapHtml(mockState.latitude, mockState.longitude),
-                        "text/html",
-                        "UTF-8",
-                        null
-                    )
+                    // Load directly from local assets folder
+                    loadUrl("file:///android_asset/leaflet/index.html")
                     webViewRef = this
                 }
             },
@@ -162,23 +190,23 @@ fun MapScreen(
             }
         )
 
-        // Top Floating Search Bar & Results
+        // Top Floating Search Bar (matching Sriharan-S/gps-mock PlaceSearchBar)
         Column(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .padding(horizontal = 16.dp, vertical = 10.dp)
         ) {
             Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = DarkSurface.copy(alpha = 0.95f)),
+                shape = RoundedCornerShape(28.dp),
+                colors = CardDefaults.cardColors(containerColor = DarkSurface.copy(alpha = 0.94f)),
                 elevation = CardDefaults.cardElevation(8.dp),
-                modifier = Modifier.fillMaxWidth().testTag("map_search_card")
+                modifier = Modifier.fillMaxWidth().testTag("place_search_bar")
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                        .padding(horizontal = 14.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
@@ -193,7 +221,7 @@ fun MapScreen(
                     OutlinedTextField(
                         value = searchQuery,
                         onValueChange = { viewModel.searchPlaces(it) },
-                        placeholder = { Text("Tìm kiếm địa chỉ, địa danh, tọa độ...", fontSize = 13.sp) },
+                        placeholder = { Text("Search location or coordinates...", fontSize = 13.sp, color = Color.Gray) },
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = Color.Transparent,
@@ -201,9 +229,7 @@ fun MapScreen(
                             focusedTextColor = Color.White,
                             unfocusedTextColor = Color.White
                         ),
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("map_search_input")
+                        modifier = Modifier.weight(1f)
                     )
 
                     if (isSearching) {
@@ -228,10 +254,10 @@ fun MapScreen(
                 }
             }
 
-            // Search results drop-down list
+            // Search Results Dropdown
             AnimatedVisibility(visible = searchResults.isNotEmpty()) {
                 Card(
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(containerColor = DarkSurfaceVariant),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -276,74 +302,62 @@ fun MapScreen(
             }
         }
 
-        // Side Quick Action Floating Action Buttons
+        // Right Control Rail (matching Sriharan-S/gps-mock)
         Column(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
-                .padding(end = 16.dp),
+                .padding(end = 14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Recenter Button
+            // Recenter Camera on Mock Pin
             FloatingActionButton(
                 onClick = {
                     val js = "javascript:centerMap(${mockState.latitude}, ${mockState.longitude});"
                     webViewRef?.evaluateJavascript(js, null)
                 },
-                modifier = Modifier.size(44.dp).testTag("recenter_map_fab"),
-                containerColor = DarkSurfaceVariant,
+                modifier = Modifier.size(42.dp).testTag("fab_recenter"),
+                containerColor = DarkSurface.copy(alpha = 0.9f),
                 contentColor = CyberCyan,
                 shape = CircleShape
             ) {
-                Icon(
-                    imageVector = Icons.Default.MyLocation,
-                    contentDescription = "Center on Mock Location",
-                    modifier = Modifier.size(20.dp)
-                )
+                Icon(Icons.Default.MyLocation, contentDescription = "Center on Pin", modifier = Modifier.size(20.dp))
             }
 
-            // Enter Precision Coordinates
+            // Direct Coordinate Input
             FloatingActionButton(
                 onClick = { viewModel.setCoordinateDialogVisible(true) },
-                modifier = Modifier.size(44.dp).testTag("enter_coordinates_fab"),
-                containerColor = DarkSurfaceVariant,
-                contentColor = CyberCyan,
+                modifier = Modifier.size(42.dp).testTag("fab_coordinates"),
+                containerColor = DarkSurface.copy(alpha = 0.9f),
+                contentColor = Color.White,
                 shape = CircleShape
             ) {
-                Icon(
-                    imageVector = Icons.Default.EditLocationAlt,
-                    contentDescription = "Input Coordinates",
-                    modifier = Modifier.size(20.dp)
-                )
+                Icon(Icons.Default.EditLocationAlt, contentDescription = "Input Coords", modifier = Modifier.size(20.dp))
             }
 
-            // Save to Favorites
-            FloatingActionButton(
-                onClick = { viewModel.setSaveLocationDialogVisible(true) },
-                modifier = Modifier.size(44.dp).testTag("save_current_fab"),
-                containerColor = DarkSurfaceVariant,
-                contentColor = CyberEmerald,
-                shape = CircleShape
-            ) {
-                Icon(
-                    imageVector = Icons.Default.BookmarkBorder,
-                    contentDescription = "Save to Favorites",
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-
-            // Joystick Toggle FAB
+            // Joystick Toggle
             FloatingActionButton(
                 onClick = { viewModel.toggleJoystick() },
-                modifier = Modifier.size(44.dp).testTag("toggle_joystick_fab"),
-                containerColor = if (showJoystick) CyberCyan else DarkSurfaceVariant,
+                modifier = Modifier.size(42.dp).testTag("fab_joystick"),
+                containerColor = if (showJoystick) CyberCyan else DarkSurface.copy(alpha = 0.9f),
                 contentColor = if (showJoystick) Color(0xFF0F172A) else Color.White,
                 shape = CircleShape
             ) {
-                Icon(
-                    imageVector = Icons.Default.Gamepad,
-                    contentDescription = "Toggle Joystick",
-                    modifier = Modifier.size(20.dp)
-                )
+                Icon(Icons.Default.Gamepad, contentDescription = "Toggle Joystick", modifier = Modifier.size(20.dp))
+            }
+
+            // Toggle Dark / Normal Tile Filter
+            FloatingActionButton(
+                onClick = {
+                    isDarkTiles = !isDarkTiles
+                    val js = "javascript:toggleMapStyle($isDarkTiles);"
+                    webViewRef?.evaluateJavascript(js, null)
+                },
+                modifier = Modifier.size(42.dp),
+                containerColor = DarkSurface.copy(alpha = 0.9f),
+                contentColor = Color.LightGray,
+                shape = CircleShape
+            ) {
+                Icon(Icons.Default.DarkMode, contentDescription = "Map Style", modifier = Modifier.size(20.dp))
             }
         }
 
@@ -352,7 +366,7 @@ fun MapScreen(
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
-                    .padding(bottom = 200.dp, start = 8.dp)
+                    .padding(bottom = 120.dp, start = 8.dp)
             ) {
                 JoystickController(
                     onMove = { bearing, stepMeters ->
@@ -363,193 +377,233 @@ fun MapScreen(
             }
         }
 
-        // Bottom Dashboard HUD Card
+        // Bottom Control Deck (matching Sriharan-S/gps-mock ControlDeck bottom sheet)
         Card(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .padding(14.dp)
-                .testTag("map_bottom_hud_card"),
-            shape = RoundedCornerShape(20.dp),
+                .padding(horizontal = 12.dp, vertical = 6.dp)
+                .animateContentSize(animationSpec = tween(240))
+                .testTag("control_deck"),
+            shape = RoundedCornerShape(24.dp),
             colors = CardDefaults.cardColors(containerColor = DarkSurface.copy(alpha = 0.96f)),
-            elevation = CardDefaults.cardElevation(12.dp)
+            elevation = CardDefaults.cardElevation(16.dp)
         ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                // Top row of HUD: Status Badge + Mode
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(10.dp)
-                                .clip(CircleShape)
-                                .background(if (mockState.isMocking) CyberEmerald else Color.Gray)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = if (mockState.isMocking) "MOCKING BẬT" else "MOCKING TẮT",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = if (mockState.isMocking) CyberEmerald else Color.Gray
-                        )
-
-                        if (mockState.mode != MockMode.IDLE) {
-                            Text(
-                                text = " • ${mockState.mode.name}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = CyberCyan
-                            )
-                        }
-                    }
-
-                    // Speed display
-                    Text(
-                        text = "${String.format(Locale.US, "%.1f", mockState.speedKmh)} km/h",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.LightGray
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Coordinates Display
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column {
-                        Text(
-                            text = "VĨ ĐỘ (LAT)",
-                            fontSize = 10.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = String.format(Locale.US, "%.6f", mockState.latitude),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color.White
-                        )
-                    }
-
-                    Column {
-                        Text(
-                            text = "KINH ĐỘ (LNG)",
-                            fontSize = 10.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = String.format(Locale.US, "%.6f", mockState.longitude),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color.White
-                        )
-                    }
-
-                    Column {
-                        Text(
-                            text = "ĐỘ CAO",
-                            fontSize = 10.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = "${mockState.altitude.toInt()} m",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color.White
-                        )
-                    }
-                }
-
-                // If running Route or Scheduled mode, show controls (Pause, Next waypoint)
-                if (mockState.mode == MockMode.ROUTE || mockState.mode == MockMode.SCHEDULED) {
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(DarkSurfaceVariant)
-                            .padding(8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text(
-                                text = mockState.statusText,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = CyberCyan
-                            )
-                            if (mockState.waitSecondsRemaining > 0) {
-                                Text(
-                                    text = "Đang dừng chờ: ${mockState.waitSecondsRemaining}s",
-                                    fontSize = 11.sp,
-                                    color = Color.Yellow
-                                )
-                            }
-                        }
-
-                        Row {
-                            IconButton(
-                                onClick = { viewModel.togglePause() },
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Icon(
-                                    imageVector = if (mockState.isPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
-                                    contentDescription = "Pause/Resume",
-                                    tint = CyberCyan,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-
-                            IconButton(
-                                onClick = { viewModel.nextWaypoint() },
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.SkipNext,
-                                    contentDescription = "Next Waypoint",
-                                    tint = CyberCyan,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Primary Start / Stop Mocking Toggle Button
-                Button(
-                    onClick = {
-                        if (mockState.isMocking) {
-                            viewModel.stopMocking()
-                        } else {
-                            viewModel.startStaticMocking()
-                        }
-                    },
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 10.dp)
+            ) {
+                // Grabber handle for expand/collapse
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(48.dp)
-                        .testTag("toggle_mocking_button"),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (mockState.isMocking) CyberRed else CyberCyan
-                    )
+                        .clickable { isDeckExpanded = !isDeckExpanded }
+                        .padding(vertical = 4.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = if (mockState.isMocking) Icons.Default.Stop else Icons.Default.PlayArrow,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(20.dp)
+                    Box(
+                        modifier = Modifier
+                            .width(36.dp)
+                            .height(4.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(Color.Gray.copy(alpha = 0.5f))
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = if (mockState.isMocking) "DỪNG GIẢ LẬP GPS" else "BẮT ĐẦU GIẢ LẬP GPS",
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
+                }
+
+                // PEEK BAR: Compact line with Mode Icon, Coords/Address, Heart Button, and Primary Action Orb
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Mode Icon Badge
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (mockState.isMocking) CyberEmerald.copy(alpha = 0.2f) else DarkSurfaceVariant
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (mockState.mode == MockMode.ROUTE) Icons.Default.Route else Icons.Default.NearMe,
+                            contentDescription = null,
+                            tint = if (mockState.isMocking) CyberEmerald else CyberCyan,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(12.dp))
+
+                    // Title & Coordinates
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { isDeckExpanded = !isDeckExpanded }
+                    ) {
+                        Text(
+                            text = if (mockState.isMocking) "GPS Mock Active" else "Mock Location Ready",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = if (mockState.isMocking) CyberEmerald else Color.White
+                        )
+                        Text(
+                            text = String.format(Locale.US, "%.5f, %.5f • Alt: %dm", mockState.latitude, mockState.longitude, mockState.altitude.toInt()),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    // Save / Favorite Heart Button
+                    IconButton(
+                        onClick = { viewModel.setSaveLocationDialogVisible(true) },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                            contentDescription = "Favorite",
+                            tint = if (isFavorite) Color.Red else Color.LightGray,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(6.dp))
+
+                    // Primary Action Orb (Large round start/stop mocking button matching _PrimaryOrb in Flutter repo)
+                    Surface(
+                        modifier = Modifier
+                            .size(46.dp)
+                            .clip(CircleShape)
+                            .clickable {
+                                if (mockState.isMocking) {
+                                    viewModel.stopMocking()
+                                } else {
+                                    viewModel.startStaticMocking()
+                                }
+                            }
+                            .testTag("primary_action_orb"),
+                        color = if (mockState.isMocking) CyberRed else CyberCyan,
+                        shape = CircleShape,
+                        shadowElevation = 6.dp
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = if (mockState.isMocking) Icons.Default.Stop else Icons.Default.PlayArrow,
+                                contentDescription = if (mockState.isMocking) "Stop Mocking" else "Start Mocking",
+                                tint = if (mockState.isMocking) Color.White else Color(0xFF0F172A),
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    }
+                }
+
+                // EXPANDED DECK DETAILS: Exposed when user taps or expands the control deck
+                AnimatedVisibility(visible = isDeckExpanded) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 10.dp)
+                    ) {
+                        // Quick Action Buttons
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Surface(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable { viewModel.selectTab(1) },
+                                color = DarkSurfaceVariant
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(Icons.Default.Favorite, contentDescription = null, tint = Color.Red, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Favorites", fontSize = 12.sp, color = Color.White)
+                                }
+                            }
+
+                            Surface(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable { viewModel.selectTab(2) },
+                                color = DarkSurfaceVariant
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(Icons.Default.Route, contentDescription = null, tint = CyberCyan, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Lập Lịch Trình", fontSize = 12.sp, color = Color.White)
+                                }
+                            }
+                        }
+
+                        // Route Progress Bar (if route mode is active)
+                        if (mockState.mode == MockMode.ROUTE || mockState.mode == MockMode.SCHEDULED) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(DarkSurfaceVariant)
+                                    .padding(10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Text(
+                                        text = mockState.statusText,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = CyberCyan
+                                    )
+                                    if (mockState.waitSecondsRemaining > 0) {
+                                        Text(
+                                            text = "Dừng chờ: ${mockState.waitSecondsRemaining}s",
+                                            fontSize = 11.sp,
+                                            color = Color.Yellow
+                                        )
+                                    }
+                                }
+
+                                Row {
+                                    IconButton(
+                                        onClick = { viewModel.togglePause() },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (mockState.isPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
+                                            contentDescription = null,
+                                            tint = CyberCyan,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+
+                                    IconButton(
+                                        onClick = { viewModel.nextWaypoint() },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.SkipNext,
+                                            contentDescription = null,
+                                            tint = CyberCyan,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -583,107 +637,4 @@ fun MapScreen(
             onDismiss = { viewModel.setSaveLocationDialogVisible(false) }
         )
     }
-}
-
-/**
- * Generates interactive OpenStreetMap HTML with Leaflet.js
- */
-private fun generateMapHtml(initialLat: Double, initialLng: Double): String {
-    return """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8" />
-            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-            <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-            <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-            <style>
-                body, html, #map { margin: 0; padding: 0; width: 100%; height: 100%; background: #0B0F19; }
-                .custom-pin {
-                    width: 32px;
-                    height: 32px;
-                    border-radius: 50%;
-                    background: #38BDF8;
-                    border: 3px solid #FFFFFF;
-                    box-shadow: 0 0 12px rgba(56, 189, 248, 0.8);
-                    position: relative;
-                }
-                .custom-pin::after {
-                    content: '';
-                    position: absolute;
-                    width: 10px;
-                    height: 10px;
-                    background: #0F172A;
-                    border-radius: 50%;
-                    top: 50%;
-                    left: 50%;
-                    transform: translate(-50%, -50%);
-                }
-                .leaflet-control-attribution { display: none; }
-            </style>
-        </head>
-        <body>
-            <div id="map"></div>
-            <script>
-                var map;
-                var marker;
-
-                function initMap(lat, lng) {
-                    map = L.map('map', {
-                        zoomControl: false,
-                        attributionControl: false
-                    }).setView([lat, lng], 15);
-
-                    // CartoDB Dark Matter / OSM tiles
-                    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-                        maxZoom: 19
-                    }).addTo(map);
-
-                    var pinIcon = L.divIcon({
-                        className: 'custom-pin-container',
-                        html: '<div class="custom-pin"></div>',
-                        iconSize: [32, 32],
-                        iconAnchor: [16, 16]
-                    });
-
-                    marker = L.marker([lat, lng], {
-                        icon: pinIcon,
-                        draggable: true
-                    }).addTo(map);
-
-                    marker.on('dragend', function(e) {
-                        var pos = marker.getLatLng();
-                        if (window.AndroidBridge) {
-                            window.AndroidBridge.onLocationSelected(pos.lat, pos.lng);
-                        }
-                    });
-
-                    map.on('click', function(e) {
-                        marker.setLatLng(e.latlng);
-                        if (window.AndroidBridge) {
-                            window.AndroidBridge.onLocationSelected(e.latlng.lat, e.latlng.lng);
-                        }
-                    });
-                }
-
-                function updateMockMarker(lat, lng, bearing) {
-                    if (marker) {
-                        marker.setLatLng([lat, lng]);
-                    }
-                }
-
-                function centerMap(lat, lng) {
-                    if (map) {
-                        map.panTo([lat, lng], { animate: true });
-                        if (marker) marker.setLatLng([lat, lng]);
-                    }
-                }
-
-                document.addEventListener("DOMContentLoaded", function() {
-                    initMap($initialLat, $initialLng);
-                });
-            </script>
-        </body>
-        </html>
-    """.trimIndent()
 }

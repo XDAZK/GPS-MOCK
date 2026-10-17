@@ -11,7 +11,13 @@ class GpsMockApplication : Application() {
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     val database by lazy { AppDatabase.getDatabase(this, applicationScope) }
-    val repository by lazy { GpsMockRepository(database.savedLocationDao(), database.routeScheduleDao()) }
+    val repository by lazy {
+        GpsMockRepository(
+            database.savedLocationDao(),
+            database.routeScheduleDao(),
+            database.mockHistoryDao()
+        )
+    }
 
     override fun onCreate() {
         super.onCreate()

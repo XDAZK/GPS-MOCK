@@ -5,6 +5,7 @@ import android.location.Geocoder
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.GpsMockApplication
+import com.example.data.model.MockHistoryEntry
 import com.example.data.model.RouteSchedule
 import com.example.data.model.SavedLocation
 import com.example.data.model.Waypoint
@@ -73,6 +74,9 @@ class GpsMockViewModel(application: Application) : AndroidViewModel(application)
     private val _userMessage = MutableStateFlow<String?>(null)
     val userMessage: StateFlow<String?> = _userMessage.asStateFlow()
 
+    private var currentSessionId: Long? = null
+    private var sessionStartTime: Long = 0
+
     // Filtered saved locations
     val savedLocations: StateFlow<List<SavedLocation>> = combine(
         repository.allSavedLocations,
@@ -87,6 +91,9 @@ class GpsMockViewModel(application: Application) : AndroidViewModel(application)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val routeSchedules: StateFlow<List<RouteSchedule>> = repository.allRouteSchedules
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val historyEntries: StateFlow<List<MockHistoryEntry>> = repository.allHistory
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun selectTab(tabIndex: Int) {
@@ -135,10 +142,30 @@ class GpsMockViewModel(application: Application) : AndroidViewModel(application)
             current.longitude,
             current.altitude
         )
+
+        sessionStartTime = System.currentTimeMillis()
+        viewModelScope.launch {
+            val entry = MockHistoryEntry(
+                mode = "fixed",
+                label = String.format(Locale.US, "%.5f, %.5f", current.latitude, current.longitude),
+                latitude = current.latitude,
+                longitude = current.longitude,
+                startedAt = sessionStartTime
+            )
+            currentSessionId = repository.addHistoryEntry(entry)
+        }
     }
 
     fun stopMocking() {
         MockLocationService.stop(getApplication())
+        val sessionId = currentSessionId
+        if (sessionId != null) {
+            val durationSec = ((System.currentTimeMillis() - sessionStartTime) / 1000).coerceAtLeast(1)
+            viewModelScope.launch {
+                repository.finishHistoryEntry(sessionId, durationSec)
+                currentSessionId = null
+            }
+        }
     }
 
     fun teleportTo(lat: Double, lng: Double, alt: Double = 10.0, name: String? = null) {
@@ -147,7 +174,7 @@ class GpsMockViewModel(application: Application) : AndroidViewModel(application)
         if (current.isMocking) {
             MockLocationService.updateLocation(getApplication(), lat, lng)
         }
-        _userMessage.value = "Đã chuyển đến: ${name ?: String.format(Locale.US, "%.5f, %.5f", lat, lng)}"
+        _userMessage.value = "Đã chọn: ${name ?: String.format(Locale.US, "%.5f, %.5f", lat, lng)}"
     }
 
     fun moveJoystick(bearing: Float, stepMeters: Double) {
@@ -165,6 +192,20 @@ class GpsMockViewModel(application: Application) : AndroidViewModel(application)
     fun startRoute(route: RouteSchedule) {
         MockLocationService.startRoute(getApplication(), route)
         _userMessage.value = "Bắt đầu lộ trình: ${route.name}"
+
+        sessionStartTime = System.currentTimeMillis()
+        val waypoints = parseWaypoints(route.waypointsJson)
+        val firstWp = waypoints.firstOrNull()
+        viewModelScope.launch {
+            val entry = MockHistoryEntry(
+                mode = "route",
+                label = route.name,
+                latitude = firstWp?.latitude ?: 0.0,
+                longitude = firstWp?.longitude ?: 0.0,
+                startedAt = sessionStartTime
+            )
+            currentSessionId = repository.addHistoryEntry(entry)
+        }
     }
 
     fun saveLocation(
@@ -186,7 +227,7 @@ class GpsMockViewModel(application: Application) : AndroidViewModel(application)
                 isPreset = false
             )
             repository.saveLocation(item)
-            _userMessage.value = "Đã lưu tọa độ: ${item.name}"
+            _userMessage.value = "Đã lưu: ${item.name}"
             _showSaveLocationDialog.value = false
         }
     }
@@ -228,6 +269,13 @@ class GpsMockViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             repository.deleteRoute(route)
             _userMessage.value = "Đã xóa lộ trình ${route.name}"
+        }
+    }
+
+    fun clearHistory() {
+        viewModelScope.launch {
+            repository.clearHistory()
+            _userMessage.value = "Đã xóa lịch sử"
         }
     }
 

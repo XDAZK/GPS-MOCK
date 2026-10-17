@@ -147,14 +147,10 @@ fun MapScreen(
                 WebView(ctx).apply {
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
-                    settings.allowFileAccess = true
-                    settings.allowContentAccess = true
+                    settings.allowFileAccessFromFileURLs = true
+                    settings.allowUniversalAccessFromFileURLs = true
                     settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                    settings.setSupportZoom(true)
-                    settings.builtInZoomControls = false
-                    settings.displayZoomControls = false
-                    settings.loadWithOverviewMode = true
-                    settings.useWideViewPort = true
+                    settings.cacheMode = WebSettings.LOAD_DEFAULT
 
                     addJavascriptInterface(
                         WebAppInterface { lat, lng ->
@@ -174,14 +170,19 @@ fun MapScreen(
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
                             isMapLoaded = true
-                            // Initialize map view at current coordinates
                             val js = "javascript:initMap(${mockState.latitude}, ${mockState.longitude});"
                             evaluateJavascript(js, null)
                         }
                     }
 
-                    // Load directly from local assets folder
-                    loadUrl("file:///android_asset/leaflet/index.html")
+                    // Load self-contained inlined map HTML with OSM origin for flawless tile loading
+                    val htmlContent = try {
+                        ctx.assets.open("leaflet/map.html").bufferedReader().use { it.readText() }
+                    } catch (e: Exception) {
+                        Log.e("GPSMockMap", "Failed to read leaflet/map.html", e)
+                        ""
+                    }
+                    loadDataWithBaseURL("https://tile.openstreetmap.org/", htmlContent, "text/html", "UTF-8", null)
                     webViewRef = this
                 }
             },
